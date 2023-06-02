@@ -8,13 +8,56 @@ ASDF_INSTALL_TYPE=${ASDF_INSTALL_TYPE:-version}
 [ -n "$ASDF_INSTALL_VERSION" ] || (>&2 echo 'Missing ASDF_INSTALL_VERSION' && exit 1)
 [ -n "$ASDF_INSTALL_PATH" ] || (>&2 echo 'Missing ASDF_INSTALL_PATH' && exit 1)
 
+get_arch() {
+  case "$(uname -s)" in
+    Windows_NT | MINGW64*) echo "windows" ;;
+    *) uname | tr '[:upper:]' '[:lower:]' ;;
+  esac
+}
+
+get_file_ext() {
+  case "$(uname -s)" in
+    Windows_NT | MINGW64*) echo ".exe" ;;
+    *) echo "" ;;
+  esac
+}
+
+get_archive_ext() {
+  case "$(uname -s)" in
+    Windows_NT | MINGW64*) echo ".zip" ;;
+    *) echo ".tar.gz" ;;
+  esac
+}
+
+get_cpu() {
+  local machine_hardware_name
+  machine_hardware_name="$(uname -m)"
+
+  case "$machine_hardware_name" in
+    'x86_64') local cpu_type="x86_64" ;;
+    'powerpc64le' | 'ppc64le') local cpu_type="ppc64le" ;;
+    'aarch64') local cpu_type="arm64" ;;
+    'armv7l') local cpu_type="armv7" ;;
+    *) local cpu_type="$machine_hardware_name" ;;
+  esac
+
+  echo "$cpu_type"
+}
+
 install_plugin() {
   local install_type=$1
   local version=$2
   local install_path=$3
-  local download_url="https://github.com/ahmetb/kubectx"
+  local arch
+  local cpu
+  local arch_ext
+  local file_ext
 
-  echo "Downloading kubectx from $download_url"
+  arch="$(get_arch)"
+  cpu="$(get_cpu)"
+  arch_ext="$(get_archive_ext)"
+  file_ext="$(get_file_ext)"
+  
 
   # HACK: asdf wants numeric version numbers, but most start with a "v"
   # since people usually tag releases in GitHub with a vX.X.X and _not_ X.X.X
@@ -24,14 +67,26 @@ install_plugin() {
     version="v${version}"
   fi
 
-  git clone --branch $version --depth=1 "$download_url.git" "$install_path" > /dev/null
+  mkdir -p "${install_path}/bin"
 
-  local bin_install_path="$install_path/bin"
-  mkdir -p "${bin_install_path}"
-  pushd "${bin_install_path}" &> /dev/null
-  ln -s ../kubectx kubectx
-  ln -s ../kubens kubens
-  popd &> /dev/null
+  local tmp_download_dir
+  tmp_download_dir=$(mktemp -d -t asdf_asdf-kubectx_XXXXXX)
+
+  for binary_name in "kubectx" "kubens"
+  do
+    local target_file="${binary_name}_${version}_${arch}_${cpu}${arch_ext}"
+    local download_url="https://github.com/ahmetb/kubectx/releases/download/${version}/${target_file}"
+    
+    curl --location --output "${tmp_download_dir}/${target_file}" "$download_url"
+    
+    if [[ "${arch_ext}" = ".zip" ]]; then
+      unzip "${tmp_download_dir}/${target_file}" "${binary_name}${file_ext}" -d "${install_path}/bin"
+    else
+      tar -xvf "${tmp_download_dir}/${target_file}" "${binary_name}${file_ext}" -C "${install_path}/bin"
+    fi
+    chmod +x "${install_path}/bin/${binary_name}${file_ext}"
+  done
+
 }
 
 install_plugin "$ASDF_INSTALL_TYPE" "$ASDF_INSTALL_VERSION" "$ASDF_INSTALL_PATH"
